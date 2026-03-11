@@ -1,0 +1,4 @@
+venv/
+.env
+sleep.db
+__pycache__/
