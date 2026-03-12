@@ -538,6 +538,23 @@ async def set_ukrainian(message: Message):
     await message.answer(t(message.from_user.id, "language_changed"), reply_markup=settings_keyboard)
 
 
+@dp.message(F.text == "🗑 Reset Data")
+async def reset_data(message: Message):
+    user_id = message.from_user.id
+
+    cursor.execute("DELETE FROM sleep WHERE user_id=?", (user_id,))
+    cursor.execute(
+        "UPDATE users SET streak=0, last_weekly_report=NULL WHERE user_id=?",
+        (user_id,)
+    )
+    conn.commit()
+
+    await message.answer(
+        t(user_id, "reset_done"),
+        reply_markup=settings_keyboard
+    )
+
+
 @dp.message(F.text == "⬅️ Back")
 async def back(message: Message):
     await message.answer(t(message.from_user.id, "back_main"), reply_markup=main_keyboard)

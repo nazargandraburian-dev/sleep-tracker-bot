@@ -19,6 +19,7 @@ stats_keyboard = ReplyKeyboardMarkup(
 settings_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🌐 Language"), KeyboardButton(text="🕓 Timezone")],
+        [KeyboardButton(text="🗑 Reset Data")],
         [KeyboardButton(text="⬅️ Back")]
     ],
     resize_keyboard=True

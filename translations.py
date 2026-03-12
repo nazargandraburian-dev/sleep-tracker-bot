@@ -66,7 +66,8 @@ translations = {
         "stats_comment_8": "Very solid sleep 😌",
         "stats_comment_7": "Not bad, but could be better 🙂",
         "stats_comment_6": "Your sleep needs improvement 😕",
-        "stats_comment_4": "You should really get more balanced sleep 😵"
+        "stats_comment_4": "You should really get more balanced sleep 😵",
+        "reset_done": "✅ Your sleep history has been reset."
     },
 
     "ru": {
@@ -136,7 +137,8 @@ translations = {
         "stats_comment_8": "Очень хороший режим сна 😌",
         "stats_comment_7": "Неплохо, но можно лучше 🙂",
         "stats_comment_6": "Твоему сну нужно улучшение 😕",
-        "stats_comment_4": "Тебе стоит наладить более сбалансированный сон 😵"
+        "stats_comment_4": "Тебе стоит наладить более сбалансированный сон 😵",
+        "reset_done": "✅ Твоя история сна была сброшена."
     },
 
     "uk": {
@@ -206,6 +208,7 @@ translations = {
         "stats_comment_8": "Дуже хороший режим сну 😌",
         "stats_comment_7": "Непогано, але може бути краще 🙂",
         "stats_comment_6": "Твій сон потребує покращення 😕",
-        "stats_comment_4": "Тобі варто налагодити більш збалансований сон 😵"
+        "stats_comment_4": "Тобі варто налагодити більш збалансований сон 😵",
+        "reset_done": "✅ Твою історію сну було скинуто."
     }
 }
