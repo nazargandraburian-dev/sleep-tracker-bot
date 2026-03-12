@@ -13,11 +13,12 @@ from timezonefinder import TimezoneFinder
 import os
 
 from keyboards import (
-    main_keyboard,
-    stats_keyboard,
-    settings_keyboard,
-    language_keyboard,
-    timezone_keyboard
+    get_main_keyboard,
+    get_stats_keyboard,
+    get_settings_keyboard,
+    get_language_keyboard,
+    get_timezone_keyboard,
+    all_button_values,
 )
 from sleep_logic import calculate_sleep
 from translations import translations
@@ -304,7 +305,7 @@ def build_stats_text(user_id: int, days: int, title_key: str, include_streak: bo
 
 def update_streak(user_id: int, bed_time_str: str, sleep_minutes: int):
     bed_time = parse_dt(bed_time_str)
-    duration_ok = sleep_minutes >= 450  # 7.5 hours
+    duration_ok = sleep_minutes >= 450
 
     bedtime_ok = (
         (18 <= bed_time.hour <= 23)
@@ -342,7 +343,7 @@ async def send_weekly_reports():
         text = build_stats_text(user_id, 7, "weekly_title", include_streak=True)
         if text:
             try:
-                await bot.send_message(user_id, text, reply_markup=main_keyboard)
+                await bot.send_message(user_id, text, reply_markup=get_main_keyboard(get_user_language(user_id)))
                 set_last_weekly_report(user_id, week_key)
             except Exception:
                 pass
@@ -357,12 +358,14 @@ async def scheduled_weekly_reports():
 async def start(message: Message):
     user_id = message.from_user.id
     ensure_user_exists(user_id)
-    await message.answer(t(user_id, "start_text"), reply_markup=main_keyboard)
+    lang = get_user_language(user_id)
+    await message.answer(t(user_id, "start_text"), reply_markup=get_main_keyboard(lang))
 
 
-@dp.message(F.text == "🌙 Bed")
+@dp.message(F.text.in_(all_button_values("bed")))
 async def bed(message: Message):
     user_id = message.from_user.id
+    lang = get_user_language(user_id)
 
     cursor.execute(
         "SELECT status FROM sleep WHERE user_id=? AND status='sleeping'",
@@ -371,7 +374,7 @@ async def bed(message: Message):
     result = cursor.fetchone()
 
     if result:
-        await message.answer(t(user_id, "bed_already"), reply_markup=main_keyboard)
+        await message.answer(t(user_id, "bed_already"), reply_markup=get_main_keyboard(lang))
         return
 
     now_local = now_for_user(user_id)
@@ -384,13 +387,14 @@ async def bed(message: Message):
 
     await message.answer(
         t(user_id, "good_night", time=format_hhmm(now_local)),
-        reply_markup=main_keyboard
+        reply_markup=get_main_keyboard(lang)
     )
 
 
-@dp.message(F.text == "☀️ Wake")
+@dp.message(F.text.in_(all_button_values("wake")))
 async def wake(message: Message):
     user_id = message.from_user.id
+    lang = get_user_language(user_id)
 
     cursor.execute(
         "SELECT id, bed_time FROM sleep WHERE user_id=? AND status='sleeping'",
@@ -399,7 +403,7 @@ async def wake(message: Message):
     row = cursor.fetchone()
 
     if not row:
-        await message.answer(t(user_id, "wake_missing"), reply_markup=main_keyboard)
+        await message.answer(t(user_id, "wake_missing"), reply_markup=get_main_keyboard(lang))
         return
 
     record_id, bed_time = row
@@ -442,105 +446,120 @@ async def wake(message: Message):
     else:
         text += "\n\n" + t(user_id, "streak_ended")
 
-    await message.answer(text, reply_markup=main_keyboard)
+    await message.answer(text, reply_markup=get_main_keyboard(lang))
 
 
-@dp.message(F.text == "📊 Stats")
+@dp.message(F.text.in_(all_button_values("stats")))
 async def stats(message: Message):
+    user_id = message.from_user.id
+    lang = get_user_language(user_id)
     await message.answer(
-        t(message.from_user.id, "stats_choose"),
-        reply_markup=stats_keyboard
+        t(user_id, "stats_choose"),
+        reply_markup=get_stats_keyboard(lang)
     )
 
 
-@dp.message(F.text == "📅 7 Days")
+@dp.message(F.text.in_(all_button_values("stats_7")))
 async def stats7(message: Message):
     user_id = message.from_user.id
+    lang = get_user_language(user_id)
     text = build_stats_text(user_id, 7, "stats_7_title")
 
     if not text:
-        await message.answer(t(user_id, "stats_7_empty"), reply_markup=stats_keyboard)
+        await message.answer(t(user_id, "stats_7_empty"), reply_markup=get_stats_keyboard(lang))
         return
 
-    await message.answer(text, reply_markup=stats_keyboard)
+    await message.answer(text, reply_markup=get_stats_keyboard(lang))
 
 
-@dp.message(F.text == "🗓 30 Days")
+@dp.message(F.text.in_(all_button_values("stats_30")))
 async def stats30(message: Message):
     user_id = message.from_user.id
+    lang = get_user_language(user_id)
     text = build_stats_text(user_id, 30, "stats_30_title")
 
     if not text:
-        await message.answer(t(user_id, "stats_30_empty"), reply_markup=stats_keyboard)
+        await message.answer(t(user_id, "stats_30_empty"), reply_markup=get_stats_keyboard(lang))
         return
 
-    await message.answer(text, reply_markup=stats_keyboard)
+    await message.answer(text, reply_markup=get_stats_keyboard(lang))
 
 
-@dp.message(F.text == "⚙️ Settings")
+@dp.message(F.text.in_(all_button_values("settings")))
 async def settings_menu(message: Message):
+    user_id = message.from_user.id
+    lang = get_user_language(user_id)
     await message.answer(
-        t(message.from_user.id, "settings_choose"),
-        reply_markup=settings_keyboard
+        t(user_id, "settings_choose"),
+        reply_markup=get_settings_keyboard(lang)
     )
 
 
-@dp.message(F.text == "🌐 Language")
+@dp.message(F.text.in_(all_button_values("language")))
 async def language_menu(message: Message):
+    user_id = message.from_user.id
+    lang = get_user_language(user_id)
     await message.answer(
-        t(message.from_user.id, "language_choose"),
-        reply_markup=language_keyboard
+        t(user_id, "language_choose"),
+        reply_markup=get_language_keyboard(lang)
     )
 
 
-@dp.message(F.text == "🕓 Timezone")
+@dp.message(F.text.in_(all_button_values("timezone")))
 async def timezone_menu(message: Message):
+    user_id = message.from_user.id
+    lang = get_user_language(user_id)
     await message.answer(
-        t(message.from_user.id, "timezone_choose") + "\n\n" + t(message.from_user.id, "timezone_request"),
-        reply_markup=timezone_keyboard
+        t(user_id, "timezone_choose") + "\n\n" + t(user_id, "timezone_request"),
+        reply_markup=get_timezone_keyboard(lang)
     )
 
 
 @dp.message(F.location)
 async def save_location_timezone(message: Message):
     user_id = message.from_user.id
+    lang = get_user_language(user_id)
     location = message.location
 
     timezone_name = tf.timezone_at(lat=location.latitude, lng=location.longitude)
 
     if not timezone_name:
-        await message.answer(t(user_id, "timezone_failed"), reply_markup=settings_keyboard)
+        await message.answer(t(user_id, "timezone_failed"), reply_markup=get_settings_keyboard(lang))
         return
 
     set_user_timezone(user_id, timezone_name)
 
     await message.answer(
         t(user_id, "timezone_updated", timezone=timezone_name),
-        reply_markup=settings_keyboard
+        reply_markup=get_settings_keyboard(lang)
     )
 
 
-@dp.message(F.text == "🇬🇧 English")
+@dp.message(F.text.in_({all_button_values("lang_en").pop()}))
 async def set_english(message: Message):
-    set_user_language(message.from_user.id, "en")
-    await message.answer(t(message.from_user.id, "language_changed"), reply_markup=settings_keyboard)
+    user_id = message.from_user.id
+    set_user_language(user_id, "en")
+    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("en"))
 
 
-@dp.message(F.text == "🇷🇺 Русский")
+@dp.message(F.text.in_({all_button_values("lang_ru").pop()}))
 async def set_russian(message: Message):
-    set_user_language(message.from_user.id, "ru")
-    await message.answer(t(message.from_user.id, "language_changed"), reply_markup=settings_keyboard)
+    user_id = message.from_user.id
+    set_user_language(user_id, "ru")
+    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("ru"))
 
 
-@dp.message(F.text == "🇺🇦 Українська")
+@dp.message(F.text.in_({all_button_values("lang_uk").pop()}))
 async def set_ukrainian(message: Message):
-    set_user_language(message.from_user.id, "uk")
-    await message.answer(t(message.from_user.id, "language_changed"), reply_markup=settings_keyboard)
+    user_id = message.from_user.id
+    set_user_language(user_id, "uk")
+    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("uk"))
 
 
-@dp.message(F.text == "🗑 Reset Data")
+@dp.message(F.text.in_(all_button_values("reset")))
 async def reset_data(message: Message):
     user_id = message.from_user.id
+    lang = get_user_language(user_id)
 
     cursor.execute("DELETE FROM sleep WHERE user_id=?", (user_id,))
     cursor.execute(
@@ -551,13 +570,15 @@ async def reset_data(message: Message):
 
     await message.answer(
         t(user_id, "reset_done"),
-        reply_markup=settings_keyboard
+        reply_markup=get_settings_keyboard(lang)
     )
 
 
-@dp.message(F.text == "⬅️ Back")
+@dp.message(F.text.in_(all_button_values("back")))
 async def back(message: Message):
-    await message.answer(t(message.from_user.id, "back_main"), reply_markup=main_keyboard)
+    user_id = message.from_user.id
+    lang = get_user_language(user_id)
+    await message.answer(t(user_id, "back_main"), reply_markup=get_main_keyboard(lang))
 
 
 async def main():
