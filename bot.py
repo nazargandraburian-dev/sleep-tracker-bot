@@ -41,6 +41,42 @@ def set_user_language(user_id: int, language: str):
     conn.commit()
 
 
+def get_user_streak(user_id: int) -> int:
+    ensure_user_exists(user_id)
+    cursor.execute("SELECT streak FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    return row[0] if row and row[0] is not None else 0
+
+
+def set_user_streak(user_id: int, streak: int):
+    ensure_user_exists(user_id)
+    cursor.execute("UPDATE users SET streak=? WHERE user_id=?", (streak, user_id))
+    conn.commit()
+
+
+def update_streak(user_id: int, bed_time_str: str, sleep_minutes: int):
+    bed_time = datetime.fromisoformat(bed_time_str)
+
+    duration_ok = sleep_minutes >= 450  # 7.5 hours
+
+    # streak идет, если лег не позже 00:00
+    # считаем нормальным время с 18:00 до 23:59 или ровно 00:00
+    bedtime_ok = (
+        (18 <= bed_time.hour <= 23)
+        or (bed_time.hour == 0 and bed_time.minute == 0)
+    )
+
+    current_streak = get_user_streak(user_id)
+
+    if duration_ok and bedtime_ok:
+        new_streak = current_streak + 1
+        set_user_streak(user_id, new_streak)
+        return True, new_streak
+    else:
+        set_user_streak(user_id, 0)
+        return False, 0
+
+
 def t(user_id: int, key: str) -> str:
     lang = get_user_language(user_id)
     return translations.get(lang, translations["en"]).get(key, key)
@@ -57,7 +93,10 @@ async def start(message: Message):
 async def bed(message: Message):
     user = message.from_user.id
 
-    cursor.execute("SELECT status FROM sleep WHERE user_id=? AND status='sleeping'", (user,))
+    cursor.execute(
+        "SELECT status FROM sleep WHERE user_id=? AND status='sleeping'",
+        (user,)
+    )
     result = cursor.fetchone()
 
     if result:
@@ -75,7 +114,8 @@ async def bed(message: Message):
     time_str = datetime.now().strftime("%H:%M")
 
     await message.answer(
-        t(user, "good_night").format(time=time_str)
+        t(user, "good_night").format(time=time_str),
+        reply_markup=main_keyboard
     )
 
 
@@ -105,12 +145,16 @@ async def wake(message: Message):
     wake_str = datetime.now().strftime("%H:%M")
 
     cursor.execute(
-        """UPDATE sleep
+        """
+        UPDATE sleep
         SET wake_time=?, duration=?, score=?, status='done'
-        WHERE id=?""",
+        WHERE id=?
+        """,
         (wake_time, minutes, score, record_id)
     )
     conn.commit()
+
+    streak_ok, streak_days = update_streak(user, bed_time, minutes)
 
     text = t(user, "good_morning").format(
         bed=bed_str,
@@ -120,6 +164,12 @@ async def wake(message: Message):
         score=score,
         comment=comment
     )
+
+    if streak_ok:
+        text += "\n\n" + t(user, "streak_active").format(days=streak_days)
+    else:
+        text += "\n\n" + t(user, "streak_ended")
+
     await message.answer(text, reply_markup=main_keyboard)
 
 
@@ -135,8 +185,10 @@ def get_stats(user, days):
     since = datetime.now() - timedelta(days=days)
 
     cursor.execute(
-        """SELECT duration, score FROM sleep
-        WHERE user_id=? AND status='done' AND wake_time>?""",
+        """
+        SELECT duration, score FROM sleep
+        WHERE user_id=? AND status='done' AND wake_time>?
+        """,
         (user, since.isoformat())
     )
 
@@ -178,8 +230,8 @@ async def stats7(message: Message):
     total, h, m, score, comment = data
 
     text = (
-        f"{t(user_id, 'stats_7_title')}\n\n" +
-        t(user_id, "stats_body").format(
+        f"{t(user_id, 'stats_7_title')}\n\n"
+        + t(user_id, "stats_body").format(
             total=total,
             hours=h,
             minutes=m,
@@ -203,8 +255,8 @@ async def stats30(message: Message):
     total, h, m, score, comment = data
 
     text = (
-        f"{t(user_id, 'stats_30_title')}\n\n" +
-        t(user_id, "stats_body").format(
+        f"{t(user_id, 'stats_30_title')}\n\n"
+        + t(user_id, "stats_body").format(
             total=total,
             hours=h,
             minutes=m,
@@ -253,7 +305,10 @@ async def set_ukrainian(message: Message):
 
 @dp.message(lambda message: message.text == "⬅️ Back")
 async def back(message: Message):
-    await message.answer(t(message.from_user.id, "back_main"), reply_markup=main_keyboard)
+    await message.answer(
+        t(message.from_user.id, "back_main"),
+        reply_markup=main_keyboard
+    )
 
 
 async def main():
