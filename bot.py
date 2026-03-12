@@ -343,7 +343,11 @@ async def send_weekly_reports():
         text = build_stats_text(user_id, 7, "weekly_title", include_streak=True)
         if text:
             try:
-                await bot.send_message(user_id, text, reply_markup=get_main_keyboard(get_user_language(user_id)))
+                await bot.send_message(
+                    user_id,
+                    text,
+                    reply_markup=get_main_keyboard(get_user_language(user_id))
+                )
                 set_last_weekly_report(user_id, week_key)
             except Exception:
                 pass
@@ -535,25 +539,34 @@ async def save_location_timezone(message: Message):
     )
 
 
-@dp.message(F.text.in_({all_button_values("lang_en").pop()}))
+@dp.message(F.text.in_(all_button_values("lang_en")))
 async def set_english(message: Message):
     user_id = message.from_user.id
     set_user_language(user_id, "en")
-    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("en"))
+    await message.answer(
+        t(user_id, "language_changed"),
+        reply_markup=get_settings_keyboard("en")
+    )
 
 
-@dp.message(F.text.in_({all_button_values("lang_ru").pop()}))
+@dp.message(F.text.in_(all_button_values("lang_ru")))
 async def set_russian(message: Message):
     user_id = message.from_user.id
     set_user_language(user_id, "ru")
-    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("ru"))
+    await message.answer(
+        t(user_id, "language_changed"),
+        reply_markup=get_settings_keyboard("ru")
+    )
 
 
-@dp.message(F.text.in_({all_button_values("lang_uk").pop()}))
+@dp.message(F.text.in_(all_button_values("lang_uk")))
 async def set_ukrainian(message: Message):
     user_id = message.from_user.id
     set_user_language(user_id, "uk")
-    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("uk"))
+    await message.answer(
+        t(user_id, "language_changed"),
+        reply_markup=get_settings_keyboard("uk")
+    )
 
 
 @dp.message(F.text.in_(all_button_values("reset")))
