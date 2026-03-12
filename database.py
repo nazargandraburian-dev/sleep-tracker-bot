@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS sleep (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
-    language TEXT DEFAULT 'en'
+    language TEXT DEFAULT 'en',
+    streak INTEGER DEFAULT 0
 )
 """)
 
