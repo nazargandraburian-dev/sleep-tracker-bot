@@ -7,8 +7,9 @@ from aiogram.types import Message
 from dotenv import load_dotenv
 import os
 
-from keyboards import main_keyboard, stats_keyboard
+from keyboards import main_keyboard, stats_keyboard, language_keyboard
 from sleep_logic import calculate_sleep
+from translations import translations
 import database
 
 load_dotenv()
@@ -22,20 +23,34 @@ conn = sqlite3.connect("sleep.db")
 cursor = conn.cursor()
 
 
+def ensure_user_exists(user_id: int):
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+
+
+def get_user_language(user_id: int) -> str:
+    ensure_user_exists(user_id)
+    cursor.execute("SELECT language FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+    return row[0] if row else "en"
+
+
+def set_user_language(user_id: int, language: str):
+    ensure_user_exists(user_id)
+    cursor.execute("UPDATE users SET language=? WHERE user_id=?", (language, user_id))
+    conn.commit()
+
+
+def t(user_id: int, key: str) -> str:
+    lang = get_user_language(user_id)
+    return translations.get(lang, translations["en"]).get(key, key)
+
+
 @dp.message(CommandStart())
 async def start(message: Message):
-    text = """
-👋 Welcome to Sleep Tracker Bot!
-
-Use the buttons below:
-
-🌙 Bed — record when you go to sleep
-☀️ Wake — record when you wake up
-📊 Stats — see sleep stats for 7 and 30 days
-
-Sleep well 😴
-"""
-    await message.answer(text, reply_markup=main_keyboard)
+    user_id = message.from_user.id
+    ensure_user_exists(user_id)
+    await message.answer(t(user_id, "start_text"), reply_markup=main_keyboard)
 
 
 @dp.message(lambda message: message.text == "🌙 Bed")
@@ -46,9 +61,7 @@ async def bed(message: Message):
     result = cursor.fetchone()
 
     if result:
-        await message.answer(
-            "🌙 Your bedtime is already recorded.\nPress ☀️ Wake when you wake up 😌"
-        )
+        await message.answer(t(user, "bed_already"))
         return
 
     now = datetime.now().isoformat()
@@ -62,7 +75,7 @@ async def bed(message: Message):
     time_str = datetime.now().strftime("%H:%M")
 
     await message.answer(
-        f"🌙 Good night!\nBed time recorded: {time_str}\nSleep well 😴"
+        t(user, "good_night").format(time=time_str)
     )
 
 
@@ -74,13 +87,10 @@ async def wake(message: Message):
         "SELECT id, bed_time FROM sleep WHERE user_id=? AND status='sleeping'",
         (user,)
     )
-
     row = cursor.fetchone()
 
     if not row:
-        await message.answer(
-            "🤔 I don’t see a bedtime record yet.\nPress 🌙 Bed first."
-        )
+        await message.answer(t(user, "wake_missing"))
         return
 
     record_id, bed_time = row
@@ -102,23 +112,23 @@ async def wake(message: Message):
     )
     conn.commit()
 
-    text = f"""
-☀️ Good morning!
-
-Sleep summary:
-
-🌙 Fell asleep: {bed_str}
-☀️ Woke up: {wake_str}
-⏳ Duration: {duration_h}h {duration_m}m
-⭐ Sleep score: {score}/10
-💬 Comment: {comment}
-"""
+    text = t(user, "good_morning").format(
+        bed=bed_str,
+        wake=wake_str,
+        hours=duration_h,
+        minutes=duration_m,
+        score=score,
+        comment=comment
+    )
     await message.answer(text, reply_markup=main_keyboard)
 
 
 @dp.message(lambda message: message.text == "📊 Stats")
 async def stats(message: Message):
-    await message.answer("📊 Choose a stats period:", reply_markup=stats_keyboard)
+    await message.answer(
+        t(message.from_user.id, "stats_choose"),
+        reply_markup=stats_keyboard
+    )
 
 
 def get_stats(user, days):
@@ -158,53 +168,92 @@ def get_stats(user, days):
 
 @dp.message(lambda message: message.text == "📅 7 Days")
 async def stats7(message: Message):
-    data = get_stats(message.from_user.id, 7)
+    user_id = message.from_user.id
+    data = get_stats(user_id, 7)
 
     if not data:
-        await message.answer(
-            "📅 No sleep data found for the last 7 days.\nStart by pressing 🌙 Bed tonight 😴"
-        )
+        await message.answer(t(user_id, "stats_7_empty"))
         return
 
     total, h, m, score, comment = data
 
-    text = f"""
-📅 Sleep report for the last 7 days
+    text = (
+        f"{t(user_id, 'stats_7_title')}\n\n" +
+        t(user_id, "stats_body").format(
+            total=total,
+            hours=h,
+            minutes=m,
+            score=score,
+            comment=comment
+        )
+    )
 
-🛌 Total sleeps: {total}
-⏳ Average duration: {h}h {m}m
-⭐ Average score: {score}/10
-💬 Comment: {comment}
-"""
     await message.answer(text)
 
 
 @dp.message(lambda message: message.text == "🗓 30 Days")
 async def stats30(message: Message):
-    data = get_stats(message.from_user.id, 30)
+    user_id = message.from_user.id
+    data = get_stats(user_id, 30)
 
     if not data:
-        await message.answer(
-            "🗓 No sleep data found for the last 30 days.\nTrack some sleep first 🌙"
-        )
+        await message.answer(t(user_id, "stats_30_empty"))
         return
 
     total, h, m, score, comment = data
 
-    text = f"""
-🗓 Sleep report for the last 30 days
+    text = (
+        f"{t(user_id, 'stats_30_title')}\n\n" +
+        t(user_id, "stats_body").format(
+            total=total,
+            hours=h,
+            minutes=m,
+            score=score,
+            comment=comment
+        )
+    )
 
-🛌 Total sleeps: {total}
-⏳ Average duration: {h}h {m}m
-⭐ Average score: {score}/10
-💬 Comment: {comment}
-"""
     await message.answer(text)
+
+
+@dp.message(lambda message: message.text == "🌐 Language")
+async def language_menu(message: Message):
+    await message.answer(
+        t(message.from_user.id, "language_choose"),
+        reply_markup=language_keyboard
+    )
+
+
+@dp.message(lambda message: message.text == "🇬🇧 English")
+async def set_english(message: Message):
+    set_user_language(message.from_user.id, "en")
+    await message.answer(
+        translations["en"]["language_changed_en"],
+        reply_markup=main_keyboard
+    )
+
+
+@dp.message(lambda message: message.text == "🇷🇺 Русский")
+async def set_russian(message: Message):
+    set_user_language(message.from_user.id, "ru")
+    await message.answer(
+        translations["ru"]["language_changed_ru"],
+        reply_markup=main_keyboard
+    )
+
+
+@dp.message(lambda message: message.text == "🇺🇦 Українська")
+async def set_ukrainian(message: Message):
+    set_user_language(message.from_user.id, "uk")
+    await message.answer(
+        translations["uk"]["language_changed_uk"],
+        reply_markup=main_keyboard
+    )
 
 
 @dp.message(lambda message: message.text == "⬅️ Back")
 async def back(message: Message):
-    await message.answer("Back to main menu.", reply_markup=main_keyboard)
+    await message.answer(t(message.from_user.id, "back_main"), reply_markup=main_keyboard)
 
 
 async def main():
