@@ -36,6 +36,8 @@ cursor = conn.cursor()
 tf = TimezoneFinder()
 scheduler = AsyncIOScheduler()
 
+MIN_VALID_SLEEP_MINUTES = 90
+
 
 def ensure_user_exists(user_id: int):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
@@ -193,8 +195,14 @@ def get_records_for_period(user_id: int, days: int):
             continue
 
         wake_dt = parse_dt(wake_time)
-        if wake_dt >= since.astimezone(wake_dt.tzinfo):
-            filtered.append((bed_time, wake_time, duration, score))
+
+        if wake_dt < since.astimezone(wake_dt.tzinfo):
+            continue
+
+        if duration is None or duration < MIN_VALID_SLEEP_MINUTES:
+            continue
+
+        filtered.append((bed_time, wake_time, duration, score))
 
     return filtered
 
@@ -202,8 +210,8 @@ def get_records_for_period(user_id: int, days: int):
 def get_sleep_animal(user_id: int, days: int):
     rows = get_records_for_period(user_id, days)
 
-    if not rows:
-        return None, None
+    if len(rows) < 5:
+        return t(user_id, "animal_not_enough_name"), t(user_id, "animal_not_enough_reason")
 
     bed_minutes = []
     short_sleep = 0
