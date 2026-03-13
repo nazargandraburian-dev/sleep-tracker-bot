@@ -1,6 +1,5 @@
 import asyncio
 import math
-import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -22,16 +21,13 @@ from keyboards import (
 )
 from sleep_logic import calculate_sleep
 from translations import translations
-import database
+from database import conn, cursor
 
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-conn = sqlite3.connect("sleep.db")
-cursor = conn.cursor()
 
 tf = TimezoneFinder()
 scheduler = AsyncIOScheduler()
@@ -40,34 +36,31 @@ MIN_VALID_SLEEP_MINUTES = 90
 
 
 def ensure_user_exists(user_id: int):
-    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-    conn.commit()
+    cursor.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
 
 
 def get_user_language(user_id: int) -> str:
     ensure_user_exists(user_id)
-    cursor.execute("SELECT language FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT language FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
     return row[0] if row and row[0] else "en"
 
 
 def set_user_language(user_id: int, language: str):
     ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET language=? WHERE user_id=?", (language, user_id))
-    conn.commit()
+    cursor.execute("UPDATE users SET language=%s WHERE user_id=%s", (language, user_id))
 
 
 def get_user_timezone(user_id: int) -> str:
     ensure_user_exists(user_id)
-    cursor.execute("SELECT timezone FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT timezone FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
     return row[0] if row and row[0] else "UTC"
 
 
 def set_user_timezone(user_id: int, timezone_name: str):
     ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET timezone=? WHERE user_id=?", (timezone_name, user_id))
-    conn.commit()
+    cursor.execute("UPDATE users SET timezone=%s WHERE user_id=%s", (timezone_name, user_id))
 
 
 def get_user_tzinfo(user_id: int) -> ZoneInfo:
@@ -79,28 +72,26 @@ def get_user_tzinfo(user_id: int) -> ZoneInfo:
 
 def get_user_streak(user_id: int) -> int:
     ensure_user_exists(user_id)
-    cursor.execute("SELECT streak FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT streak FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
     return row[0] if row and row[0] is not None else 0
 
 
 def set_user_streak(user_id: int, streak: int):
     ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET streak=? WHERE user_id=?", (streak, user_id))
-    conn.commit()
+    cursor.execute("UPDATE users SET streak=%s WHERE user_id=%s", (streak, user_id))
 
 
 def get_last_weekly_report(user_id: int):
     ensure_user_exists(user_id)
-    cursor.execute("SELECT last_weekly_report FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT last_weekly_report FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
     return row[0] if row else None
 
 
 def set_last_weekly_report(user_id: int, week_key: str):
     ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET last_weekly_report=? WHERE user_id=?", (week_key, user_id))
-    conn.commit()
+    cursor.execute("UPDATE users SET last_weekly_report=%s WHERE user_id=%s", (week_key, user_id))
 
 
 def t(user_id: int, key: str, **kwargs) -> str:
@@ -109,8 +100,11 @@ def t(user_id: int, key: str, **kwargs) -> str:
     return text.format(**kwargs) if kwargs else text
 
 
-def parse_dt(dt_str: str) -> datetime:
-    dt = datetime.fromisoformat(dt_str)
+def parse_dt(dt_val):
+    if isinstance(dt_val, datetime):
+        dt = dt_val
+    else:
+        dt = datetime.fromisoformat(dt_val)
     if dt.tzinfo is None:
         return dt.replace(tzinfo=ZoneInfo("UTC"))
     return dt
@@ -127,15 +121,12 @@ def format_hhmm(dt: datetime) -> str:
 def circular_mean_minutes(values: list[int]) -> int:
     if not values:
         return 0
-
     angles = [2 * math.pi * (v / 1440) for v in values]
     sin_sum = sum(math.sin(a) for a in angles)
     cos_sum = sum(math.cos(a) for a in angles)
-
     mean_angle = math.atan2(sin_sum, cos_sum)
     if mean_angle < 0:
         mean_angle += 2 * math.pi
-
     return int(round(mean_angle * 1440 / (2 * math.pi))) % 1440
 
 
@@ -181,7 +172,7 @@ def get_records_for_period(user_id: int, days: int):
         """
         SELECT bed_time, wake_time, duration, score
         FROM sleep
-        WHERE user_id=? AND status='done'
+        WHERE user_id=%s AND status='done'
         ORDER BY wake_time DESC
         """,
         (user_id,)
@@ -232,13 +223,10 @@ def get_sleep_animal(user_id: int, days: int):
 
     if late_bed >= 4 and short_sleep >= 3:
         return t(user_id, "animal_wolf_name"), t(user_id, "animal_wolf_reason")
-
     if late_bed >= 4:
         return t(user_id, "animal_owl_name"), t(user_id, "animal_owl_reason")
-
     if spread >= 240 or short_sleep >= 4:
         return t(user_id, "animal_dolphin_name"), t(user_id, "animal_dolphin_reason")
-
     return t(user_id, "animal_bear_name"), t(user_id, "animal_bear_reason")
 
 
@@ -258,7 +246,6 @@ def get_stats(user_id: int, days: int):
     for bed_time, wake_time, _, _ in rows:
         bed_dt = parse_dt(bed_time)
         wake_dt = parse_dt(wake_time)
-
         bed_values.append(bed_dt.hour * 60 + bed_dt.minute)
         wake_values.append(wake_dt.hour * 60 + wake_dt.minute)
 
@@ -311,14 +298,10 @@ def build_stats_text(user_id: int, days: int, title_key: str, include_streak: bo
     return text
 
 
-def update_streak(user_id: int, bed_time_str: str, sleep_minutes: int):
-    bed_time = parse_dt(bed_time_str)
+def update_streak(user_id: int, bed_time_val, sleep_minutes: int):
+    bed_time = parse_dt(bed_time_val)
     duration_ok = sleep_minutes >= 450
-
-    bedtime_ok = (
-        (18 <= bed_time.hour <= 23)
-        or (bed_time.hour == 0 and bed_time.minute == 0)
-    )
+    bedtime_ok = ((18 <= bed_time.hour <= 23) or (bed_time.hour == 0 and bed_time.minute == 0))
 
     current_streak = get_user_streak(user_id)
 
@@ -380,7 +363,7 @@ async def bed(message: Message):
     lang = get_user_language(user_id)
 
     cursor.execute(
-        "SELECT status FROM sleep WHERE user_id=? AND status='sleeping'",
+        "SELECT status FROM sleep WHERE user_id=%s AND status='sleeping'",
         (user_id,)
     )
     result = cursor.fetchone()
@@ -392,10 +375,9 @@ async def bed(message: Message):
     now_local = now_for_user(user_id)
 
     cursor.execute(
-        "INSERT INTO sleep (user_id, bed_time, status) VALUES (?, ?, 'sleeping')",
-        (user_id, now_local.isoformat())
+        "INSERT INTO sleep (user_id, bed_time, status) VALUES (%s, %s, 'sleeping')",
+        (user_id, now_local)
     )
-    conn.commit()
 
     await message.answer(
         t(user_id, "good_night", time=format_hhmm(now_local)),
@@ -409,7 +391,7 @@ async def wake(message: Message):
     lang = get_user_language(user_id)
 
     cursor.execute(
-        "SELECT id, bed_time FROM sleep WHERE user_id=? AND status='sleeping'",
+        "SELECT id, bed_time FROM sleep WHERE user_id=%s AND status='sleeping'",
         (user_id,)
     )
     row = cursor.fetchone()
@@ -419,9 +401,9 @@ async def wake(message: Message):
         return
 
     record_id, bed_time = row
-    wake_time = now_for_user(user_id).isoformat()
+    wake_time = now_for_user(user_id)
 
-    minutes, score, _ = calculate_sleep(bed_time, wake_time)
+    minutes, score, _ = calculate_sleep(bed_time.isoformat(), wake_time.isoformat())
     comment = sleep_comment_from_score(user_id, score)
 
     duration_h = minutes // 60
@@ -433,12 +415,11 @@ async def wake(message: Message):
     cursor.execute(
         """
         UPDATE sleep
-        SET wake_time=?, duration=?, score=?, status='done'
-        WHERE id=?
+        SET wake_time=%s, duration=%s, score=%s, status='done'
+        WHERE id=%s
         """,
         (wake_time, minutes, score, record_id)
     )
-    conn.commit()
 
     streak_ok, streak_days = update_streak(user_id, bed_time, minutes)
 
@@ -465,10 +446,7 @@ async def wake(message: Message):
 async def stats(message: Message):
     user_id = message.from_user.id
     lang = get_user_language(user_id)
-    await message.answer(
-        t(user_id, "stats_choose"),
-        reply_markup=get_stats_keyboard(lang)
-    )
+    await message.answer(t(user_id, "stats_choose"), reply_markup=get_stats_keyboard(lang))
 
 
 @dp.message(F.text.in_(all_button_values("stats_7")))
@@ -501,20 +479,14 @@ async def stats30(message: Message):
 async def settings_menu(message: Message):
     user_id = message.from_user.id
     lang = get_user_language(user_id)
-    await message.answer(
-        t(user_id, "settings_choose"),
-        reply_markup=get_settings_keyboard(lang)
-    )
+    await message.answer(t(user_id, "settings_choose"), reply_markup=get_settings_keyboard(lang))
 
 
 @dp.message(F.text.in_(all_button_values("language")))
 async def language_menu(message: Message):
     user_id = message.from_user.id
     lang = get_user_language(user_id)
-    await message.answer(
-        t(user_id, "language_choose"),
-        reply_markup=get_language_keyboard(lang)
-    )
+    await message.answer(t(user_id, "language_choose"), reply_markup=get_language_keyboard(lang))
 
 
 @dp.message(F.text.in_(all_button_values("timezone")))
@@ -551,30 +523,21 @@ async def save_location_timezone(message: Message):
 async def set_english(message: Message):
     user_id = message.from_user.id
     set_user_language(user_id, "en")
-    await message.answer(
-        t(user_id, "language_changed"),
-        reply_markup=get_settings_keyboard("en")
-    )
+    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("en"))
 
 
 @dp.message(F.text.in_(all_button_values("lang_ru")))
 async def set_russian(message: Message):
     user_id = message.from_user.id
     set_user_language(user_id, "ru")
-    await message.answer(
-        t(user_id, "language_changed"),
-        reply_markup=get_settings_keyboard("ru")
-    )
+    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("ru"))
 
 
 @dp.message(F.text.in_(all_button_values("lang_uk")))
 async def set_ukrainian(message: Message):
     user_id = message.from_user.id
     set_user_language(user_id, "uk")
-    await message.answer(
-        t(user_id, "language_changed"),
-        reply_markup=get_settings_keyboard("uk")
-    )
+    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("uk"))
 
 
 @dp.message(F.text.in_(all_button_values("reset")))
@@ -582,17 +545,13 @@ async def reset_data(message: Message):
     user_id = message.from_user.id
     lang = get_user_language(user_id)
 
-    cursor.execute("DELETE FROM sleep WHERE user_id=?", (user_id,))
+    cursor.execute("DELETE FROM sleep WHERE user_id=%s", (user_id,))
     cursor.execute(
-        "UPDATE users SET streak=0, last_weekly_report=NULL WHERE user_id=?",
+        "UPDATE users SET streak=0, last_weekly_report=NULL WHERE user_id=%s",
         (user_id,)
     )
-    conn.commit()
 
-    await message.answer(
-        t(user_id, "reset_done"),
-        reply_markup=get_settings_keyboard(lang)
-    )
+    await message.answer(t(user_id, "reset_done"), reply_markup=get_settings_keyboard(lang))
 
 
 @dp.message(F.text.in_(all_button_values("back")))
