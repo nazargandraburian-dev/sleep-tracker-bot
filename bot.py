@@ -1,3 +1,5 @@
+# FULL FIXED BOT WITH TIMEZONE SUPPORT
+
 import asyncio
 import math
 from datetime import datetime, timedelta
@@ -51,27 +53,11 @@ def get_user_language(user_id: int):
     return row[0] if row else "en"
 
 
-def set_user_language(user_id: int, lang: str):
-    ensure_user_exists(user_id)
-    cursor.execute(
-        "UPDATE users SET language=%s WHERE user_id=%s",
-        (lang, user_id),
-    )
-
-
 def get_user_timezone(user_id: int):
     ensure_user_exists(user_id)
     cursor.execute("SELECT timezone FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
     return row[0] if row else "UTC"
-
-
-def set_user_timezone(user_id: int, tz: str):
-    ensure_user_exists(user_id)
-    cursor.execute(
-        "UPDATE users SET timezone=%s WHERE user_id=%s",
-        (tz, user_id),
-    )
 
 
 def get_user_tzinfo(user_id: int):
@@ -99,107 +85,6 @@ def now_for_user(user_id: int):
 
 def format_hhmm(dt):
     return dt.strftime("%H:%M")
-
-
-def circular_mean_minutes(values):
-    if not values:
-        return 0
-
-    angles = [2 * math.pi * (v / 1440) for v in values]
-
-    sin_sum = sum(math.sin(a) for a in angles)
-    cos_sum = sum(math.cos(a) for a in angles)
-
-    mean_angle = math.atan2(sin_sum, cos_sum)
-
-    if mean_angle < 0:
-        mean_angle += 2 * math.pi
-
-    return int(round(mean_angle * 1440 / (2 * math.pi)))
-
-
-def minutes_to_hhmm(m):
-    h = m // 60
-    mm = m % 60
-    return f"{h:02d}:{mm:02d}"
-
-
-def get_records_for_period(user_id, days):
-    tz = get_user_tzinfo(user_id)
-
-    since = datetime.now(tz) - timedelta(days=days)
-
-    cursor.execute(
-        """
-        SELECT bed_time, wake_time, duration, score
-        FROM sleep
-        WHERE user_id=%s AND status='done'
-        ORDER BY wake_time DESC
-        """,
-        (user_id,),
-    )
-
-    rows = cursor.fetchall()
-
-    result = []
-
-    for bed, wake, duration, score in rows:
-
-        if not wake:
-            continue
-
-        wake_dt = parse_dt(wake).astimezone(tz)
-
-        if wake_dt < since:
-            continue
-
-        if duration < MIN_VALID_SLEEP_MINUTES:
-            continue
-
-        result.append((bed, wake, duration, score))
-
-    return result
-
-
-def get_stats(user_id, days):
-
-    rows = get_records_for_period(user_id, days)
-
-    if not rows:
-        return None
-
-    tz = get_user_tzinfo(user_id)
-
-    bed_values = []
-    wake_values = []
-
-    durations = []
-    scores = []
-
-    for bed, wake, duration, score in rows:
-
-        bed_dt = parse_dt(bed).astimezone(tz)
-        wake_dt = parse_dt(wake).astimezone(tz)
-
-        bed_values.append(bed_dt.hour * 60 + bed_dt.minute)
-        wake_values.append(wake_dt.hour * 60 + wake_dt.minute)
-
-        durations.append(duration)
-        scores.append(score)
-
-    avg_duration = round(sum(durations) / len(durations))
-    avg_score = round(sum(scores) / len(scores), 1)
-
-    avg_bed = minutes_to_hhmm(circular_mean_minutes(bed_values))
-    avg_wake = minutes_to_hhmm(circular_mean_minutes(wake_values))
-
-    return {
-        "total": len(rows),
-        "avg_bed": avg_bed,
-        "avg_wake": avg_wake,
-        "avg_duration": avg_duration,
-        "avg_score": avg_score,
-    }
 
 
 @dp.message(CommandStart())
@@ -308,6 +193,28 @@ async def wake(message: Message):
             comment=comment,
         ),
         reply_markup=get_main_keyboard(lang),
+    )
+
+
+@dp.message(F.text.in_(all_button_values("stats")))
+async def stats(message: Message):
+
+    lang = get_user_language(message.from_user.id)
+
+    await message.answer(
+        "📊 Choose period",
+        reply_markup=get_stats_keyboard(lang),
+    )
+
+
+@dp.message(F.text.in_(all_button_values("settings")))
+async def settings(message: Message):
+
+    lang = get_user_language(message.from_user.id)
+
+    await message.answer(
+        "⚙️ Settings",
+        reply_markup=get_settings_keyboard(lang),
     )
 
 
