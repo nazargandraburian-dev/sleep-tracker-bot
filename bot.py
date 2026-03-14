@@ -19,6 +19,7 @@ from keyboards import (
     get_timezone_keyboard,
     all_button_values,
 )
+
 from sleep_logic import calculate_sleep
 from translations import translations
 from database import conn, cursor
@@ -26,6 +27,7 @@ from database import conn, cursor
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
@@ -36,137 +38,96 @@ MIN_VALID_SLEEP_MINUTES = 90
 
 
 def ensure_user_exists(user_id: int):
-    cursor.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
+    cursor.execute(
+        "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+        (user_id,),
+    )
 
 
-def get_user_language(user_id: int) -> str:
+def get_user_language(user_id: int):
     ensure_user_exists(user_id)
     cursor.execute("SELECT language FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
-    return row[0] if row and row[0] else "en"
+    return row[0] if row else "en"
 
 
-def set_user_language(user_id: int, language: str):
+def set_user_language(user_id: int, lang: str):
     ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET language=%s WHERE user_id=%s", (language, user_id))
+    cursor.execute(
+        "UPDATE users SET language=%s WHERE user_id=%s",
+        (lang, user_id),
+    )
 
 
-def get_user_timezone(user_id: int) -> str:
+def get_user_timezone(user_id: int):
     ensure_user_exists(user_id)
     cursor.execute("SELECT timezone FROM users WHERE user_id=%s", (user_id,))
     row = cursor.fetchone()
-    return row[0] if row and row[0] else "UTC"
+    return row[0] if row else "UTC"
 
 
-def set_user_timezone(user_id: int, timezone_name: str):
+def set_user_timezone(user_id: int, tz: str):
     ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET timezone=%s WHERE user_id=%s", (timezone_name, user_id))
+    cursor.execute(
+        "UPDATE users SET timezone=%s WHERE user_id=%s",
+        (tz, user_id),
+    )
 
 
-def get_user_tzinfo(user_id: int) -> ZoneInfo:
+def get_user_tzinfo(user_id: int):
     try:
         return ZoneInfo(get_user_timezone(user_id))
     except Exception:
         return ZoneInfo("UTC")
 
 
-def get_user_streak(user_id: int) -> int:
-    ensure_user_exists(user_id)
-    cursor.execute("SELECT streak FROM users WHERE user_id=%s", (user_id,))
-    row = cursor.fetchone()
-    return row[0] if row and row[0] is not None else 0
-
-
-def set_user_streak(user_id: int, streak: int):
-    ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET streak=%s WHERE user_id=%s", (streak, user_id))
-
-
-def get_last_weekly_report(user_id: int):
-    ensure_user_exists(user_id)
-    cursor.execute("SELECT last_weekly_report FROM users WHERE user_id=%s", (user_id,))
-    row = cursor.fetchone()
-    return row[0] if row else None
-
-
-def set_last_weekly_report(user_id: int, week_key: str):
-    ensure_user_exists(user_id)
-    cursor.execute("UPDATE users SET last_weekly_report=%s WHERE user_id=%s", (week_key, user_id))
-
-
-def t(user_id: int, key: str, **kwargs) -> str:
+def t(user_id: int, key: str, **kwargs):
     lang = get_user_language(user_id)
     text = translations.get(lang, translations["en"]).get(key, key)
-    return text.format(**kwargs) if kwargs else text
+    return text.format(**kwargs)
 
 
-def parse_dt(dt_val):
-    if isinstance(dt_val, datetime):
-        dt = dt_val
-    else:
-        dt = datetime.fromisoformat(dt_val)
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=ZoneInfo("UTC"))
-    return dt
+def parse_dt(dt):
+    if isinstance(dt, datetime):
+        return dt
+    return datetime.fromisoformat(dt)
 
 
-def now_for_user(user_id: int) -> datetime:
+def now_for_user(user_id: int):
     return datetime.now(get_user_tzinfo(user_id))
 
 
-def format_hhmm(dt: datetime) -> str:
+def format_hhmm(dt):
     return dt.strftime("%H:%M")
 
 
-def circular_mean_minutes(values: list[int]) -> int:
+def circular_mean_minutes(values):
     if not values:
         return 0
+
     angles = [2 * math.pi * (v / 1440) for v in values]
+
     sin_sum = sum(math.sin(a) for a in angles)
     cos_sum = sum(math.cos(a) for a in angles)
+
     mean_angle = math.atan2(sin_sum, cos_sum)
+
     if mean_angle < 0:
         mean_angle += 2 * math.pi
-    return int(round(mean_angle * 1440 / (2 * math.pi))) % 1440
+
+    return int(round(mean_angle * 1440 / (2 * math.pi)))
 
 
-def minutes_to_hhmm(minutes: int) -> str:
-    hours = minutes // 60
-    mins = minutes % 60
-    return f"{hours:02d}:{mins:02d}"
+def minutes_to_hhmm(m):
+    h = m // 60
+    mm = m % 60
+    return f"{h:02d}:{mm:02d}"
 
 
-def sleep_comment_from_score(user_id: int, score: int) -> str:
-    if score >= 10:
-        return t(user_id, "comment_10")
-    if score >= 9:
-        return t(user_id, "comment_9")
-    if score >= 8:
-        return t(user_id, "comment_8")
-    if score >= 7:
-        return t(user_id, "comment_7")
-    if score >= 6:
-        return t(user_id, "comment_6")
-    if score >= 4:
-        return t(user_id, "comment_4")
-    return t(user_id, "comment_2")
+def get_records_for_period(user_id, days):
+    tz = get_user_tzinfo(user_id)
 
-
-def stats_comment_from_score(user_id: int, avg_score: float) -> str:
-    if avg_score >= 9:
-        return t(user_id, "stats_comment_9")
-    if avg_score >= 8:
-        return t(user_id, "stats_comment_8")
-    if avg_score >= 7:
-        return t(user_id, "stats_comment_7")
-    if avg_score >= 6:
-        return t(user_id, "stats_comment_6")
-    return t(user_id, "stats_comment_4")
-
-
-def get_records_for_period(user_id: int, days: int):
-    now_local = now_for_user(user_id)
-    since = now_local - timedelta(days=days)
+    since = datetime.now(tz) - timedelta(days=days)
 
     cursor.execute(
         """
@@ -175,242 +136,156 @@ def get_records_for_period(user_id: int, days: int):
         WHERE user_id=%s AND status='done'
         ORDER BY wake_time DESC
         """,
-        (user_id,)
+        (user_id,),
     )
 
     rows = cursor.fetchall()
-    filtered = []
 
-    for bed_time, wake_time, duration, score in rows:
-        if not wake_time:
+    result = []
+
+    for bed, wake, duration, score in rows:
+
+        if not wake:
             continue
 
-        wake_dt = parse_dt(wake_time)
+        wake_dt = parse_dt(wake).astimezone(tz)
 
-        if wake_dt < since.astimezone(wake_dt.tzinfo):
+        if wake_dt < since:
             continue
 
-        if duration is None or duration < MIN_VALID_SLEEP_MINUTES:
+        if duration < MIN_VALID_SLEEP_MINUTES:
             continue
 
-        filtered.append((bed_time, wake_time, duration, score))
+        result.append((bed, wake, duration, score))
 
-    return filtered
-
-
-def get_sleep_animal(user_id: int, days: int):
-    rows = get_records_for_period(user_id, days)
-
-    if len(rows) < 5:
-        return t(user_id, "animal_not_enough_name"), t(user_id, "animal_not_enough_reason")
-
-    bed_minutes = []
-    short_sleep = 0
-    late_bed = 0
-
-    for bed_time, _, duration, _ in rows:
-        bed_dt = parse_dt(bed_time)
-        mins = bed_dt.hour * 60 + bed_dt.minute
-        bed_minutes.append(mins)
-
-        if duration < 420:
-            short_sleep += 1
-
-        if 0 <= bed_dt.hour < 4:
-            late_bed += 1
-
-    spread = max(bed_minutes) - min(bed_minutes) if bed_minutes else 0
-
-    if late_bed >= 4 and short_sleep >= 3:
-        return t(user_id, "animal_wolf_name"), t(user_id, "animal_wolf_reason")
-    if late_bed >= 4:
-        return t(user_id, "animal_owl_name"), t(user_id, "animal_owl_reason")
-    if spread >= 240 or short_sleep >= 4:
-        return t(user_id, "animal_dolphin_name"), t(user_id, "animal_dolphin_reason")
-    return t(user_id, "animal_bear_name"), t(user_id, "animal_bear_reason")
+    return result
 
 
-def get_stats(user_id: int, days: int):
+def get_stats(user_id, days):
+
     rows = get_records_for_period(user_id, days)
 
     if not rows:
         return None
 
-    total = len(rows)
-    avg_duration = round(sum(r[2] for r in rows) / total)
-    avg_score = round(sum(r[3] for r in rows) / total, 1)
+    tz = get_user_tzinfo(user_id)
 
     bed_values = []
     wake_values = []
 
-    for bed_time, wake_time, _, _ in rows:
-        bed_dt = parse_dt(bed_time)
-        wake_dt = parse_dt(wake_time)
+    durations = []
+    scores = []
+
+    for bed, wake, duration, score in rows:
+
+        bed_dt = parse_dt(bed).astimezone(tz)
+        wake_dt = parse_dt(wake).astimezone(tz)
+
         bed_values.append(bed_dt.hour * 60 + bed_dt.minute)
         wake_values.append(wake_dt.hour * 60 + wake_dt.minute)
+
+        durations.append(duration)
+        scores.append(score)
+
+    avg_duration = round(sum(durations) / len(durations))
+    avg_score = round(sum(scores) / len(scores), 1)
 
     avg_bed = minutes_to_hhmm(circular_mean_minutes(bed_values))
     avg_wake = minutes_to_hhmm(circular_mean_minutes(wake_values))
 
-    hours = avg_duration // 60
-    minutes = avg_duration % 60
-    comment = stats_comment_from_score(user_id, avg_score)
-
     return {
-        "total": total,
+        "total": len(rows),
         "avg_bed": avg_bed,
         "avg_wake": avg_wake,
-        "hours": hours,
-        "minutes": minutes,
-        "score": avg_score,
-        "comment": comment
+        "avg_duration": avg_duration,
+        "avg_score": avg_score,
     }
-
-
-def build_stats_text(user_id: int, days: int, title_key: str, include_streak: bool = False):
-    data = get_stats(user_id, days)
-    if not data:
-        return None
-
-    text = (
-        f"{t(user_id, title_key)}\n\n"
-        + t(
-            user_id,
-            "stats_body",
-            total=data["total"],
-            avg_bed=data["avg_bed"],
-            avg_wake=data["avg_wake"],
-            hours=data["hours"],
-            minutes=data["minutes"],
-            score=data["score"],
-            comment=data["comment"]
-        )
-    )
-
-    if include_streak:
-        text += "\n" + t(user_id, "current_streak", days=get_user_streak(user_id))
-
-    animal_name, animal_reason = get_sleep_animal(user_id, days)
-    if animal_name and animal_reason:
-        text += "\n\n" + t(user_id, "animal_title", animal=animal_name)
-        text += "\n" + animal_reason
-
-    return text
-
-
-def update_streak(user_id: int, bed_time_val, sleep_minutes: int):
-    bed_time = parse_dt(bed_time_val)
-    duration_ok = sleep_minutes >= 450
-    bedtime_ok = ((18 <= bed_time.hour <= 23) or (bed_time.hour == 0 and bed_time.minute == 0))
-
-    current_streak = get_user_streak(user_id)
-
-    if duration_ok and bedtime_ok:
-        new_streak = current_streak + 1
-        set_user_streak(user_id, new_streak)
-        return True, new_streak
-
-    set_user_streak(user_id, 0)
-    return False, 0
-
-
-async def send_weekly_reports():
-    cursor.execute("SELECT user_id FROM users")
-    user_rows = cursor.fetchall()
-
-    for (user_id,) in user_rows:
-        tz = get_user_tzinfo(user_id)
-        now_local = datetime.now(tz)
-
-        if not (now_local.weekday() == 6 and now_local.hour == 15 and 0 <= now_local.minute < 5):
-            continue
-
-        iso = now_local.isocalendar()
-        week_key = f"{iso.year}-W{iso.week}"
-
-        if get_last_weekly_report(user_id) == week_key:
-            continue
-
-        text = build_stats_text(user_id, 7, "weekly_title", include_streak=True)
-        if text:
-            try:
-                await bot.send_message(
-                    user_id,
-                    text,
-                    reply_markup=get_main_keyboard(get_user_language(user_id))
-                )
-                set_last_weekly_report(user_id, week_key)
-            except Exception:
-                pass
-
-
-@scheduler.scheduled_job("interval", minutes=1)
-async def scheduled_weekly_reports():
-    await send_weekly_reports()
 
 
 @dp.message(CommandStart())
 async def start(message: Message):
+
     user_id = message.from_user.id
+
     ensure_user_exists(user_id)
+
     lang = get_user_language(user_id)
-    await message.answer(t(user_id, "start_text"), reply_markup=get_main_keyboard(lang))
+
+    await message.answer(
+        t(user_id, "start_text"),
+        reply_markup=get_main_keyboard(lang),
+    )
 
 
 @dp.message(F.text.in_(all_button_values("bed")))
 async def bed(message: Message):
+
     user_id = message.from_user.id
     lang = get_user_language(user_id)
 
     cursor.execute(
-        "SELECT status FROM sleep WHERE user_id=%s AND status='sleeping'",
-        (user_id,)
+        "SELECT id FROM sleep WHERE user_id=%s AND status='sleeping'",
+        (user_id,),
     )
-    result = cursor.fetchone()
 
-    if result:
-        await message.answer(t(user_id, "bed_already"), reply_markup=get_main_keyboard(lang))
+    if cursor.fetchone():
+
+        await message.answer(
+            t(user_id, "bed_already"),
+            reply_markup=get_main_keyboard(lang),
+        )
         return
 
-    now_local = now_for_user(user_id)
+    now = now_for_user(user_id)
 
     cursor.execute(
-        "INSERT INTO sleep (user_id, bed_time, status) VALUES (%s, %s, 'sleeping')",
-        (user_id, now_local)
+        "INSERT INTO sleep (user_id, bed_time, status) VALUES (%s,%s,'sleeping')",
+        (user_id, now),
     )
 
     await message.answer(
-        t(user_id, "good_night", time=format_hhmm(now_local)),
-        reply_markup=get_main_keyboard(lang)
+        t(user_id, "good_night", time=format_hhmm(now)),
+        reply_markup=get_main_keyboard(lang),
     )
 
 
 @dp.message(F.text.in_(all_button_values("wake")))
 async def wake(message: Message):
+
     user_id = message.from_user.id
     lang = get_user_language(user_id)
 
     cursor.execute(
         "SELECT id, bed_time FROM sleep WHERE user_id=%s AND status='sleeping'",
-        (user_id,)
+        (user_id,),
     )
+
     row = cursor.fetchone()
 
     if not row:
-        await message.answer(t(user_id, "wake_missing"), reply_markup=get_main_keyboard(lang))
+
+        await message.answer(
+            t(user_id, "wake_missing"),
+            reply_markup=get_main_keyboard(lang),
+        )
         return
 
     record_id, bed_time = row
+
     wake_time = now_for_user(user_id)
 
-    minutes, score, _ = calculate_sleep(bed_time.isoformat(), wake_time.isoformat())
-    comment = sleep_comment_from_score(user_id, score)
+    minutes, score, comment = calculate_sleep(
+        bed_time.isoformat(),
+        wake_time.isoformat(),
+    )
 
     duration_h = minutes // 60
     duration_m = minutes % 60
 
-    bed_dt = parse_dt(bed_time)
-    wake_dt = parse_dt(wake_time)
+    tz = get_user_tzinfo(user_id)
+
+    bed_dt = parse_dt(bed_time).astimezone(tz)
+    wake_dt = parse_dt(wake_time).astimezone(tz)
 
     cursor.execute(
         """
@@ -418,147 +293,22 @@ async def wake(message: Message):
         SET wake_time=%s, duration=%s, score=%s, status='done'
         WHERE id=%s
         """,
-        (wake_time, minutes, score, record_id)
+        (wake_time, minutes, score, record_id),
     )
-
-    streak_ok, streak_days = update_streak(user_id, bed_time, minutes)
-
-    text = t(
-        user_id,
-        "good_morning",
-        bed=format_hhmm(bed_dt),
-        wake=format_hhmm(wake_dt),
-        hours=duration_h,
-        minutes=duration_m,
-        score=score,
-        comment=comment
-    )
-
-    if streak_ok:
-        text += "\n\n" + t(user_id, "streak_active", days=streak_days)
-    else:
-        text += "\n\n" + t(user_id, "streak_ended")
-
-    await message.answer(text, reply_markup=get_main_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("stats")))
-async def stats(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    await message.answer(t(user_id, "stats_choose"), reply_markup=get_stats_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("stats_7")))
-async def stats7(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    text = build_stats_text(user_id, 7, "stats_7_title")
-
-    if not text:
-        await message.answer(t(user_id, "stats_7_empty"), reply_markup=get_stats_keyboard(lang))
-        return
-
-    await message.answer(text, reply_markup=get_stats_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("stats_30")))
-async def stats30(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    text = build_stats_text(user_id, 30, "stats_30_title")
-
-    if not text:
-        await message.answer(t(user_id, "stats_30_empty"), reply_markup=get_stats_keyboard(lang))
-        return
-
-    await message.answer(text, reply_markup=get_stats_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("settings")))
-async def settings_menu(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    await message.answer(t(user_id, "settings_choose"), reply_markup=get_settings_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("language")))
-async def language_menu(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    await message.answer(t(user_id, "language_choose"), reply_markup=get_language_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("timezone")))
-async def timezone_menu(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    await message.answer(
-        t(user_id, "timezone_choose") + "\n\n" + t(user_id, "timezone_request"),
-        reply_markup=get_timezone_keyboard(lang)
-    )
-
-
-@dp.message(F.location)
-async def save_location_timezone(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    location = message.location
-
-    timezone_name = tf.timezone_at(lat=location.latitude, lng=location.longitude)
-
-    if not timezone_name:
-        await message.answer(t(user_id, "timezone_failed"), reply_markup=get_settings_keyboard(lang))
-        return
-
-    set_user_timezone(user_id, timezone_name)
 
     await message.answer(
-        t(user_id, "timezone_updated", timezone=timezone_name),
-        reply_markup=get_settings_keyboard(lang)
+        t(
+            user_id,
+            "good_morning",
+            bed=format_hhmm(bed_dt),
+            wake=format_hhmm(wake_dt),
+            hours=duration_h,
+            minutes=duration_m,
+            score=score,
+            comment=comment,
+        ),
+        reply_markup=get_main_keyboard(lang),
     )
-
-
-@dp.message(F.text.in_(all_button_values("lang_en")))
-async def set_english(message: Message):
-    user_id = message.from_user.id
-    set_user_language(user_id, "en")
-    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("en"))
-
-
-@dp.message(F.text.in_(all_button_values("lang_ru")))
-async def set_russian(message: Message):
-    user_id = message.from_user.id
-    set_user_language(user_id, "ru")
-    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("ru"))
-
-
-@dp.message(F.text.in_(all_button_values("lang_uk")))
-async def set_ukrainian(message: Message):
-    user_id = message.from_user.id
-    set_user_language(user_id, "uk")
-    await message.answer(t(user_id, "language_changed"), reply_markup=get_settings_keyboard("uk"))
-
-
-@dp.message(F.text.in_(all_button_values("reset")))
-async def reset_data(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-
-    cursor.execute("DELETE FROM sleep WHERE user_id=%s", (user_id,))
-    cursor.execute(
-        "UPDATE users SET streak=0, last_weekly_report=NULL WHERE user_id=%s",
-        (user_id,)
-    )
-
-    await message.answer(t(user_id, "reset_done"), reply_markup=get_settings_keyboard(lang))
-
-
-@dp.message(F.text.in_(all_button_values("back")))
-async def back(message: Message):
-    user_id = message.from_user.id
-    lang = get_user_language(user_id)
-    await message.answer(t(user_id, "back_main"), reply_markup=get_main_keyboard(lang))
 
 
 async def main():
