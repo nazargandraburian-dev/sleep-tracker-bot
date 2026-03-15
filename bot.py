@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
 import os
@@ -30,7 +29,6 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 tf = TimezoneFinder()
-scheduler = AsyncIOScheduler()
 
 MIN_VALID_SLEEP_MINUTES = 90
 
@@ -91,21 +89,6 @@ def set_user_streak(user_id: int, streak: int):
     cursor.execute(
         "UPDATE users SET streak=%s WHERE user_id=%s",
         (streak, user_id),
-    )
-
-
-def get_last_weekly_report(user_id: int):
-    ensure_user_exists(user_id)
-    cursor.execute("SELECT last_weekly_report FROM users WHERE user_id=%s", (user_id,))
-    row = cursor.fetchone()
-    return row[0] if row else None
-
-
-def set_last_weekly_report(user_id: int, week_key: str):
-    ensure_user_exists(user_id)
-    cursor.execute(
-        "UPDATE users SET last_weekly_report=%s WHERE user_id=%s",
-        (week_key, user_id),
     )
 
 
@@ -338,41 +321,6 @@ def update_streak(user_id: int, bed_time_val, sleep_minutes: int):
 
     set_user_streak(user_id, 0)
     return False, 0
-
-
-async def send_weekly_reports():
-    cursor.execute("SELECT user_id FROM users")
-    user_rows = cursor.fetchall()
-
-    for (user_id,) in user_rows:
-        tz = get_user_tzinfo(user_id)
-        now_local = datetime.now(tz)
-
-        if not (now_local.weekday() == 6 and now_local.hour == 15 and 0 <= now_local.minute < 5):
-            continue
-
-        iso = now_local.isocalendar()
-        week_key = f"{iso.year}-W{iso.week}"
-
-        if get_last_weekly_report(user_id) == week_key:
-            continue
-
-        text = build_stats_text(user_id, 7, "weekly_title", include_streak=True)
-        if text:
-            try:
-                await bot.send_message(
-                    user_id,
-                    text,
-                    reply_markup=get_main_keyboard(get_user_language(user_id)),
-                )
-                set_last_weekly_report(user_id, week_key)
-            except Exception:
-                pass
-
-
-@scheduler.scheduled_job("interval", minutes=1)
-async def scheduled_weekly_reports():
-    await send_weekly_reports()
 
 
 @dp.message(CommandStart())
@@ -646,7 +594,6 @@ async def back(message: Message):
 
 
 async def main():
-    scheduler.start()
     await dp.start_polling(bot)
 
 
